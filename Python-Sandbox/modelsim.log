@@ -1,0 +1,10 @@
+# Loading work.tb_top
+# Loading work.alu_unit
+# ** Warning: (vsim-3015) [Time: 100 ps] Module output is high-impedance (Z).
+# ** Info: [Time: 250 ps] Testcase reset_sequence finished.
+# ** Error: (vsim-3017) [Time: 540 ps] Assertion Failed: Data mismatch in ALU out. Expected 0xFA, Got 0x00.
+# ** Warning: (vsim-3015) [Time: 800 ps] Setup violation on pin clk.
+# ** Error: (vsim-3017) [Time: 1120 ps] Timeout waiting for valid signal!
+# ** Fatal: [Time: 1120 ps] Simulation terminated prematurely.
+# Simulation finished.
+
