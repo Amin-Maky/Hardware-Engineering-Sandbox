@@ -38,7 +38,84 @@ package <dut>_tb_pkg;
         SCEN_RANDOM           = 3
     } scenario_e;
 
-    // [In steps 4 through 7, the Transaction, Generator, Driver, Monitor, Scoreboard, and Env classes will be defined here]
+    //-----------------------------------------------------------------------------
+    // STEP 4: Transaction Class & Constrained-Random Stimulus
+    //-----------------------------------------------------------------------------
+    // Note 1 (What is a Transaction?):
+    // A Transaction bundles all signals of a single bus operation into one object.
+    // Instead of thinking about individual pins toggling at every clock, the TB 
+    // components communicate by passing these high-level packets via Mailboxes.
+    class <dut>_transaction;
+
+        //-------------------------------------------------------------------------
+        // 4.1 Stimulus Fields (Inputs to DUT - Declared as 'rand' or 'randc')
+        //-------------------------------------------------------------------------
+        // - 'rand' : Standard random (like rolling a die; values can repeat).
+        // - 'randc': Cyclic random (like dealing cards; doesn't repeat until all 
+        //            possible values have been generated). Great for opcodes/modes!
+        rand  data_t       in_data;
+        randc op_mode_e    op_mode;    // Example enum from Step 1
+        rand  int unsigned start_delay; // Random idle cycles between transactions
+
+        //-------------------------------------------------------------------------
+        // 4.2 Observed Fields (Outputs from DUT - MUST NOT be 'rand')
+        //-------------------------------------------------------------------------
+        // The Monitor fills these fields when sampling the interface.
+        result_t out_result;
+        data_t   out_data;
+        logic    done;
+
+        //-------------------------------------------------------------------------
+        // 4.3 Constraints (Guiding the Random Solver towards Corner Cases)
+        //-------------------------------------------------------------------------
+        // Note 2 (Why weighted distributions 'dist'?):
+        // Pure randomness rarely hits 32-bit/16-bit corner cases (e.g., 0x0000, 0xFFFF).
+        // Using 'dist' forces the solver to hit critical edge cases frequently.
+        //   ':=' assigns weight to EVERY single value in a range.
+        //   ':/' divides the weight equally across the ENTIRE range.
+        constraint c_data_corners {
+            in_data dist {
+                '0                  := 10, // 10% weight: All zeros (Minimum)
+                '1                  := 10, // 10% weight: All ones  (Maximum)
+                DATA_WIDTH'(16'hAAAA) := 5,  //  5% weight: Alternating bits (1010...)
+                DATA_WIDTH'(16'h5555) := 5,  //  5% weight: Alternating bits (0101...)
+                [1 : ('1 - 1)]      :/ 70  // 70% weight shared across all normal values
+            };
+        }
+
+        // Controlling protocol timing (e.g., testing back-to-back vs. delayed starts)
+        constraint c_timing {
+            start_delay dist {
+                0       := 50, // 50% chance of back-to-back transactions (stress test!)
+                [1 : 5] :/ 50  // 50% chance of 1 to 5 idle cycles between transactions
+            };
+        }
+
+        //-------------------------------------------------------------------------
+        // 4.4 Utility Methods (Deep Copy & Print)
+        //-------------------------------------------------------------------------
+        // Note 3 (Why Deep Copy is critical):
+        // Class variables are handles (pointers). If the Generator re-randomizes the 
+        // same object handle in a loop without cloning it via copy(), it will overwrite 
+        // the transactions already sitting in the Mailbox waiting for the Driver!
+        function <dut>_transaction copy();
+            copy = new();
+            copy.in_data     = this.in_data;
+            copy.op_mode     = this.op_mode;
+            copy.start_delay = this.start_delay;
+            copy.out_result  = this.out_result;
+            copy.out_data    = this.out_data;
+            copy.done        = this.done;
+            return copy;
+        endfunction : copy
+
+        // Helper function for clean debug logs in the console
+        function void display(string tag = "TR");
+            $display("[%0t] [%s] op=%s | in_data=0x%0h (delay=%0d) | out_res=0x%0h | done=%0b",
+                     $time, tag, op_mode.name(), in_data, start_delay, out_result, done);
+        endfunction : display
+
+    endclass : <dut>_transaction
 
 endpackage : <dut>_tb_pkg
 

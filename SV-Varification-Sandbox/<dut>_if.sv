@@ -81,17 +81,20 @@ interface <dut>_if (
     modport DRV (clocking drv_cb, input clk);
     modport MON (clocking mon_cb, input clk);
 
+
+
     //-----------------------------------------------------------------------------
     // STEP 3: SystemVerilog Assertions (SVA) for Protocol Verification
     //-----------------------------------------------------------------------------
-    // Note 6 (SVA Placement):
-    // Assertions are placed directly within the interface to gain direct, 
-    // clean access to physical signals without the overhead of TB class traversal.
-    // They act as an "always-on" hardware watchdog.
+    // Note 6 (SVA Placement & Scheduling):
+    // Assertions are placed directly inside the interface to monitor physical pins
+    // without TB class overhead. They sample signals in the Preponed region (just 
+    // like 'input #1step' in clocking blocks), ensuring zero race conditions.
 
     // 3.1 Reset Check: Ensures outputs are safely driven to zero when rst_n is low.
+    // Using '0 (unsized zero) makes it scalable for any parameterized width.
     property p_reset_state;
-        @(posedge clk) !rst_n |-> (done == 1'b0 && out_result == 5'b0);
+        @(posedge clk) !rst_n |-> (done == 1'b0 && out_result == '0 && out_data == '0);
     endproperty
     AST_RESET: assert property (p_reset_state) 
         else $error("[SVA ERROR] Outputs not zero during reset at time %0t!", $time);
@@ -103,23 +106,37 @@ interface <dut>_if (
     AST_START_IN_RST: assert property (p_no_start_in_reset) 
         else $error("[SVA ERROR] 'start' asserted while 'rst_n' is low at time %0t!", $time);
 
-    // 3.3 Handshake Latency: Verifies the DUT responds exactly 1 cycle after 'start'.
-    // 'disable iff' ensures assertions are ignored during reset to avoid false negatives.
+    // 3.3 Handshake Latency: 
+    // - Option A (Single-Cycle DUT): start |=> done;
+    // - Option B (Multi-Cycle DUT) : start |-> ##[1:TIMEOUT_CYCLES] done;
+    // 'disable iff' aborts the check if reset occurs mid-transaction.
     property p_start_to_done;
         @(posedge clk) disable iff (!rst_n)
-        start |=> done;
+        start |=> done; // Change to ##[1:MAX_LATENCY] for multi-cycle DUTs
     endproperty
     AST_LATENCY: assert property (p_start_to_done) 
-        else $error("[SVA ERROR] 'done' did not assert 1 cycle after 'start' at time %0t!", $time);
+        else $error("[SVA ERROR] Handshake timeout/latency violation at time %0t!", $time);
 
-    // 3.4 Data Integrity: Ensures no X/Z states are present in result when transaction completes.
+    // 3.4 Data Integrity (No X/Z): Ensures valid logic levels on outputs when done is high.
     property p_result_known;
         @(posedge clk) disable iff (!rst_n)
-        done |-> !$isunknown(out_result);
+        done |-> (!$isunknown(out_result) && !$isunknown(out_data));
     endproperty
     AST_KNOWN_RES: assert property (p_result_known) 
-        else $error("[SVA ERROR] 'out_result' contains X/Z when 'done' is high at time %0t!", $time);
+        else $error("[SVA ERROR] Output contains X/Z when 'done' is high at time %0t!", $time);
 
-
-
+    // 3.5 Data Stability & Vivado XSim Quirk (For Multi-Cycle DUTs):
+    // If the DUT takes multiple cycles, input data must remain stable until 'done'.
+    // XSIM NOTE: Always pass '@(posedge clk)' explicitly as the 3rd argument to $past 
+    // or 2nd argument to $stable in Vivado XSim to prevent clock-inference compile errors!
+    /*
+    property p_data_stability;
+        @(posedge clk) disable iff (!rst_n)
+        (start && !done) |=> $stable(in_data, @(posedge clk));
+        // Equivalent using $past: (in_data == $past(in_data, 1, @(posedge clk)))
+    endproperty
+    AST_DATA_STABLE: assert property (p_data_stability)
+        else $error("[SVA ERROR] 'in_data' changed before 'done' at time %0t!", $time);
+    */
+    
 endinterface : <dut>_if
